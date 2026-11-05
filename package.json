@@ -1,0 +1,159 @@
+{
+  "name": "commitgen",
+  "displayName": "CommitGen",
+  "description": "用你自己的提示词，从 git diff 生成提交信息",
+  "version": "0.2.6",
+  "publisher": "GMinKra",
+  "license": "MIT",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "SCM Providers"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "commitgen.generate",
+        "title": "生成提交信息",
+        "category": "CommitGen",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "commitgen.hub",
+        "title": "设置与诊断",
+        "category": "CommitGen"
+      },
+      {
+        "command": "commitgen.testConnection",
+        "title": "测试连通性",
+        "category": "CommitGen"
+      },
+      {
+        "command": "commitgen.configure",
+        "title": "配置服务地址与模型",
+        "category": "CommitGen"
+      },
+      {
+        "command": "commitgen.setApiKey",
+        "title": "设置 API Key",
+        "category": "CommitGen"
+      },
+      {
+        "command": "commitgen.clearApiKey",
+        "title": "清除 API Key",
+        "category": "CommitGen"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "commitgen.generate",
+          "group": "navigation@1",
+          "when": "scmProvider == git && !commitgen.generating"
+        },
+        {
+          "command": "commitgen.hub",
+          "group": "1_commitgen",
+          "when": "scmProvider == git"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "commitgen.generate",
+          "when": "scmProvider == git"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "commitgen.generate",
+        "key": "ctrl+alt+g",
+        "when": "scmProvider == git && !commitgen.generating"
+      }
+    ],
+    "configuration": {
+      "title": "CommitGen",
+      "properties": {
+        "commitgen.baseUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "markdownDescription": "OpenAI 兼容接口地址，必须包含 `/v1`，例如 `https://api.openai.com/v1`。留空时首次生成会引导填写。"
+        },
+        "commitgen.model": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "markdownDescription": "模型名，例如 `gpt-4o-mini`、`deepseek-chat`。留空时首次生成会引导填写。"
+        },
+        "commitgen.prompt": {
+          "type": "string",
+          "editPresentation": "multilineText",
+          "scope": "window",
+          "markdownDescription": "发给模型的提示词。可用占位符：`${diff}` 改动内容、`${branch}` 当前分支、`${files}` 改动文件列表、`${staged}` 是否有已暂存改动。",
+          "default": "你是一位遵循 Conventional Commits 规范的高级工程师。请根据下面的 git diff 生成一条提交信息。\n\n输出格式：\n<type>(<scope>): <一句话概括>\n\n- <一条具体改动，必要时在括号里补充依据或验证方式>\n- <继续列，一条一个事实>\n\n<最后一行：验证状态>\n\n规则：\n1. type 取 feat / fix / docs / style / refactor / perf / test / build / ci / chore / revert；scope 用受影响的模块名，可省略\n2. subject 用中文，不超过 50 字，句末不加句号\n3. body 用「- 」开头的无序列表，每条只讲一件事；不复述代码，不写“本次提交”“优化代码”这类空话\n4. 单条过长时折行，续行缩进 2 个空格，每行不超过 72 个字符\n5. 只写 diff 里真实发生的变化，不要概括整个项目，不要编造 diff 里没有的内容\n6. 若仓库状态是“首次提交”，type 用 feat 或 chore，subject 写“初始化 …”\n7. 最后一行单独写验证状态（是否编译、是否跑过测试）；判断不出来就写“未编译，待验证”\n8. 不要 Markdown 粗体、标题、代码块，不要引号，不要 git commit -m 前缀\n\n示例：\ndocs(acq): 精简 acq 与归档层注释，去掉冗余叙述\n\n- bsp_acq.c/h 注释纯精简，可执行代码零改动（已逐行比对 HEAD 的代码行序列确认）\n- 合并复述同一事实的 @note，原先三处各写一遍，现只在调用点写一次\n- 删除复述代码本身的多行铺陈，只留约束与理由\n\n未编译，待 RT-Thread Studio 验证。\n\n${context}\n\n改动文件：\n${files}\n\ndiff：\n${diff}"
+        },
+        "commitgen.maxDiffChars": {
+          "type": "number",
+          "default": 40000,
+          "minimum": 2000,
+          "scope": "window",
+          "markdownDescription": "发给模型的 diff 最大字符数，超出按文件截断。"
+        },
+        "commitgen.timeoutMs": {
+          "type": "number",
+          "default": 60000,
+          "minimum": 5000,
+          "scope": "window",
+          "markdownDescription": "单次请求超时（毫秒）。"
+        },
+        "commitgen.writeMode": {
+          "type": "string",
+          "enum": [
+            "replace",
+            "append",
+            "ask"
+          ],
+          "enumDescriptions": [
+            "直接覆盖提交框内容",
+            "追加到提交框已有内容之后",
+            "已有内容时询问覆盖还是追加"
+          ],
+          "default": "replace",
+          "scope": "window",
+          "markdownDescription": "生成结果如何写回提交框。"
+        },
+        "commitgen.reasoningEffort": {
+          "type": "string",
+          "enum": [
+            "",
+            "low",
+            "medium",
+            "high"
+          ],
+          "enumDescriptions": [
+            "不发送该参数（兼容性最好）",
+            "低：更快",
+            "中",
+            "高：更细但更慢"
+          ],
+          "default": "",
+          "scope": "window",
+          "markdownDescription": "请求体里的 `reasoning_effort`。推理型模型（o 系列等）思考耗时长，设为 `low` 可缩短等待；留空表示不发送该参数。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.5.0"
+  }
+}
