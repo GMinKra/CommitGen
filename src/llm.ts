@@ -3,6 +3,7 @@ export type LlmErrorKind =
   | 'notfound'
   | 'ratelimit'
   | 'http'
+  | 'param'
   | 'network'
   | 'timeout'
   | 'empty'
@@ -32,6 +33,8 @@ export interface ChatOptions {
   onReasoning?: (delta: string) => void;
   /** 可选：请求体里的 reasoning_effort（空则不带） */
   reasoningEffort?: string;
+  /** 可选：采样温度；null/undefined 表示不发送（推理型模型只接受默认值） */
+  temperature?: number | null;
 }
 
 export interface ConnectionTestOptions {
@@ -54,10 +57,16 @@ export async function chat(options: ChatOptions): Promise<string> {
     throw new LlmError('已取消。', 'canceled');
   }
   options.signal.addEventListener('abort', forwardAbort, { once: true });
-  const timer = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, options.timeoutMs);
+
+  // 空闲计时：推理模型思考期可达数分钟，只有连续无数据才算超时
+  let lastActivity = Date.now();
+  const idleLimitMs = Math.max(options.timeoutMs, 1000);
+  const timer = setInterval(() => {
+    if (Date.now() - lastActivity > idleLimitMs) {
+      timedOut = true;
+      controller.abort();
+    }
+  }, 1000);
 
   try {
     let response: Response;
@@ -71,7 +80,9 @@ export async function chat(options: ChatOptions): Promise<string> {
         body: JSON.stringify({
           model: options.model,
           stream: true,
-          temperature: 0.2,
+          ...(typeof options.temperature === 'number'
+            ? { temperature: options.temperature }
+            : {}),
           ...(options.reasoningEffort ? { reasoning_effort: options.reasoningEffort } : {}),
           messages: [{ role: 'user', content: options.prompt }],
         }),
@@ -84,6 +95,8 @@ export async function chat(options: ChatOptions): Promise<string> {
       throw transportError(error, timedOut);
     }
 
+    lastActivity = Date.now();
+
     if (!response.ok) {
       throw await httpError(response);
     }
@@ -95,8 +108,12 @@ export async function chat(options: ChatOptions): Promise<string> {
       text = contentType.includes('text/event-stream')
         ? await readEventStream(
             response,
-            options.onChunk,
             (delta) => {
+              lastActivity = Date.now();
+              options.onChunk?.(delta);
+            },
+            (delta) => {
+              lastActivity = Date.now();
               reasoningSeen = true;
               options.onReasoning?.(delta);
             },
@@ -122,7 +139,7 @@ export async function chat(options: ChatOptions): Promise<string> {
     }
     return text;
   } finally {
-    clearTimeout(timer);
+    clearInterval(timer);
     options.signal.removeEventListener('abort', forwardAbort);
   }
 }
@@ -131,7 +148,7 @@ export async function chat(options: ChatOptions): Promise<string> {
 export async function testConnection(options: ConnectionTestOptions): Promise<ConnectionTestResult> {
   const controller = new AbortController();
   let timedOut = false;
-  const timeoutMs = Math.min(options.timeoutMs ?? 15000, 20000);
+  const timeoutMs = Math.min(options.timeoutMs ?? 30_000, 60_000);
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
@@ -179,8 +196,24 @@ export async function testConnection(options: ConnectionTestOptions): Promise<Co
   }
 }
 
+/**
+ * 只填域名时补 /v1：OpenAI 兼容服务几乎都在 /v1 下；
+ * 已有路径（/v1、/api/v1、/compatible-mode/v1）保留不动。
+ */
+export function normalizeBaseUrl(input: string): string {
+  const trimmed = (input ?? '').trim().replace(/\/+$/, '');
+  if (!trimmed) {
+    return '';
+  }
+  if (/\/chat\/completions$/i.test(trimmed)) {
+    return trimmed;
+  }
+  const path = trimmed.replace(/^https?:\/\/[^/]+/i, '');
+  return path.length > 0 ? trimmed : `${trimmed}/v1`;
+}
+
 function endpoint(baseUrl: string): string {
-  const base = baseUrl.trim().replace(/\/+$/, '');
+  const base = normalizeBaseUrl(baseUrl);
   if (/\/chat\/completions$/i.test(base)) {
     return base;
   }
@@ -196,6 +229,9 @@ function transportError(error: unknown, timedOut: boolean): LlmError {
     'network',
   );
 }
+
+/** 400/422 里出现这些词，基本就是模型或中转不接受该参数。 */
+const PARAM_REJECTED = /(reasoning_effort|temperature|unsupported|unrecognized|unknown (?:request )?argument)/i;
 
 async function httpError(response: Response): Promise<LlmError> {
   const detail = await response.text().catch(() => '');
@@ -213,6 +249,13 @@ async function httpError(response: Response): Promise<LlmError> {
   }
   if (response.status === 429) {
     return new LlmError('请求被限流或额度不足（HTTP 429）。', 'ratelimit', 429);
+  }
+  if ((response.status === 400 || response.status === 422) && PARAM_REJECTED.test(detail)) {
+    return new LlmError(
+      `接口不接受当前参数（HTTP ${response.status}）${snippet ? `：${snippet}` : ''}。推理型模型只接受默认温度；非推理模型不认识 reasoning_effort。`,
+      'param',
+      response.status,
+    );
   }
   return new LlmError(
     `接口返回 HTTP ${response.status}${snippet ? `：${snippet}` : ''}`,

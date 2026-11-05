@@ -19,7 +19,7 @@
 从 VSIX：
 
 ```
-code --install-extension commitgen-0.2.9.vsix
+code --install-extension commitgen-0.3.1.vsix
 ```
 
 或在扩展视图右上 `⋯` → **从 VSIX 安装...**，装完重新加载窗口。
@@ -29,7 +29,7 @@ code --install-extension commitgen-0.2.9.vsix
 1. 安装后重载窗口，右下角出现 `CommitGen` 状态栏项
 2. 打开任意 git 仓库，点源代码管理标题栏的 ✨（或状态栏 → 生成提交信息）
 3. 首次会依次提示填写：
-   - 服务地址（必须含 `/v1`，如 `https://api.openai.com/v1`）
+   - 服务地址（如 `https://api.openai.com/v1`；只填域名会自动补 `/v1`）
    - 模型名（如 `gpt-4o-mini`、`deepseek-chat`）
    - API Key
 4. 填完自动做连通性测试，通过后立刻生成
@@ -39,19 +39,20 @@ code --install-extension commitgen-0.2.9.vsix
 
 | 设置项 | 默认 | 说明 |
 |---|---|---|
-| `commitgen.baseUrl` | 空 | OpenAI 兼容接口地址，必须包含 `/v1` |
+| `commitgen.baseUrl` | 空 | OpenAI 兼容接口地址，必须包含 `/v1`；只填域名时自动补 `/v1` |
 | `commitgen.model` | 空 | 模型名 |
 | `commitgen.prompt` | 内置模板 | 提示词本体，设置里为多行编辑 |
 | `commitgen.maxDiffChars` | `40000` | 发给模型的 diff 上限，超出按文件块截断 |
-| `commitgen.timeoutMs` | `60000` | 单次请求超时（毫秒） |
+| `commitgen.timeoutMs` | `60000` | 连续无数据多久算超时（毫秒）；推理模型的思考阶段不会被打断 |
 | `commitgen.writeMode` | `replace` | `replace` 覆盖 / `append` 追加 / `ask` 询问 |
-| `commitgen.reasoningEffort` | `default` | 下拉可选 `default` / `low` / `medium` / `high` / `max`，对应请求体的 `reasoning_effort`；`default` 表示不发送该参数。也可在 CommitGen 菜单或命令 `CommitGen: 设置思考强度` 里改 |
+| `commitgen.reasoningEffort` | `default` | 下拉可选 `default` / `low` / `high` / `max`，对应请求体的 `reasoning_effort`；`default` 表示不发送该参数。也可在 CommitGen 菜单或命令 `CommitGen: 设置思考强度` 里改 |
+| `commitgen.temperature` | `null` | 采样温度 0–2；`null` 表示不发送该参数（推理型模型只接受默认温度） |
 
 ## 模板变量
 
 | 变量 | 内容 |
 |---|---|
-| `${diff}` | 改动内容（已按上限截断；未跟踪文件以 `new file` diff 形式呈现） |
+| `${diff}` | 改动内容（已按上限截断；暂存与未暂存分段标注；未跟踪文件以 `new file` diff 形式呈现） |
 | `${context}` | 仓库状态块：是否首次提交、当前分支、是否已暂存 |
 | `${files}` | 改动文件列表 |
 | `${branch}` | 当前分支名 |
@@ -69,17 +70,15 @@ docs(acq): 精简 acq 与归档层注释，去掉冗余叙述
 - bsp_acq.c/h 注释纯精简，可执行代码零改动（已逐行比对 HEAD 的代码行序列确认）
 - 合并复述同一事实的 @note，原先三处各写一遍，现只在调用点写一次
 - 删除复述代码本身的多行铺陈，只留约束与理由
-
-未编译，待 RT-Thread Studio 验证。
 ```
 
-规则：首行 `type(scope): 概括`（≤50 字、无句号）→ 空行 → `- ` 逐条列具体改动 → 最后单独一行写验证状态。
+规则：首行 `type(scope): 概括`（≤50 字、无句号）→ 空行 → `- ` 逐条列具体改动。
 
 ## 安全说明
 
 - API Key 只保存在 VS Code 的 `context.secrets`（Windows 走凭据管理器），扩展不写任何明文配置
 - 请求只发往你填的 `baseUrl`，不发遥测
-- 用 `http://` 时：本机回环地址（`127.0.0.1` / `localhost` / `::1`）不提示；其他地址会提示一次，确认后记住，可随时点「改用 https」
+- 用 `http://` 时：本机回环地址（`127.0.0.1` / `localhost` / `::1`）不提示；其他地址会提示一次，确认后记住，可随时点「改用 https」。选「改用 https」会打开设置并中止本次生成，不会把 Key 发往旧地址
 
 ## 常见问题
 
@@ -93,16 +92,19 @@ docs(acq): 精简 acq 与归档层注释，去掉冗余叙述
 
 - 首个 token 很久、期间进度条显示「模型思考中…」→ 用的是推理型模型，思考阶段不产出正文。换非推理模型，或把 `commitgen.reasoningEffort` 设为 `low`
 - 首个 token 快但总时长长 → 输出量大或接口限速
-- 完全没动静且很快报错 → 看错误提示分类（鉴权 / 404 / 超时 / 网络）
+- 完全没动静且很快报错 → 看错误提示分类（鉴权 / 404 / 超时 / 网络 / 参数）
+
+**报 HTTP 400，提示参数不支持？**
+推理型模型（o 系、gpt-5 系）只接受默认温度，非推理模型不认识 `reasoning_effort`。点错误提示上的「改为兼容参数」即可把思考强度改回 `default`、温度改为不发送。
 
 **报网络或超时？**
-扩展宿主的 `fetch` 不自动使用系统代理。走代理时把 `baseUrl` 换成一个可直连的中转地址。
+扩展宿主的 `fetch` 不自动使用系统代理。走代理时把 `baseUrl` 换成一个可直连的中转地址。超时按「连续无数据」计，模型思考期间不会中断。
 
 **按钮不出现？**
-按钮的显示条件是 `scmProvider == git`：当前窗口要打开一个 git 仓库，且源代码管理视图里有「存储库」。空间不足时会折叠进标题栏 `⋯`。
+按钮的显示条件是 `scmProvider == git`：当前窗口要打开一个 git 仓库，且源代码管理视图里有「存储库」。空间不足时会折叠进标题栏 `⋯`。生成过程中按钮、菜单项和快捷键都会暂时隐藏，避免重复触发。
 
 **没有改动时能生成吗？**
-不能，会提示「当前没有可提交的改动」。未跟踪文件会被当作新增文件纳入 diff。
+不能，会提示「当前没有可提交的改动」。未跟踪文件会被当作新增文件纳入 diff；只有二进制文件时仍会生成，diff 位置列出受影响文件。
 
 **首次提交（仓库还没有任何提交）？**
 `${context}` 会标注为首次提交，默认模板会让模型写成 `chore: 初始化 …` 而不是「新增某功能」。
@@ -112,6 +114,7 @@ docs(acq): 精简 acq 与归档层注释，去掉冗余叙述
 ```bash
 npm install
 npm run compile        # tsc 到 out/
+npm run verify         # 校验 manifest / README / 默认提示词一致性
 npx @vscode/vsce package --allow-missing-repository --skip-license
 ```
 
@@ -121,4 +124,5 @@ npx @vscode/vsce package --allow-missing-repository --skip-license
 
 - 单仓库：多根工作区时取当前选中的仓库
 - 只支持 OpenAI 兼容的 `/chat/completions`（含 SSE 流式）
+- SSE 解析按单行 `data:` 处理，不支持多行 data 的事件拆分
 - 推理型模型的 `reasoning_content` 只用于进度提示，不会写进提交信息

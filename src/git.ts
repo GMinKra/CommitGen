@@ -90,14 +90,16 @@ export async function collectDiff(repository: GitRepository): Promise<DiffSnapsh
     return undefined;
   }
 
-  const parts: string[] = [];
-  if (state.indexChanges.length > 0) {
-    parts.push(await safeDiff(() => repository.diff(true)));
-  }
-  if (state.workingTreeChanges.length > 0) {
-    parts.push(await safeDiff(() => repository.diff(false)));
-  }
-  let diff = parts.filter((part) => part.trim().length > 0).join('\n');
+  const staged = state.indexChanges.length > 0 ? await safeDiff(() => repository.diff(true)) : '';
+  const unstaged =
+    state.workingTreeChanges.length > 0 ? await safeDiff(() => repository.diff(false)) : '';
+  // 同一文件可能同时有暂存与未暂存改动，分段标注，避免模型读到两份无来源的差量
+  let diff = [
+    staged.trim() ? `# 已暂存改动（index）\n${staged.trim()}` : '',
+    unstaged.trim() ? `# 未暂存改动（working tree）\n${unstaged.trim()}` : '',
+  ]
+    .filter((part) => part.length > 0)
+    .join('\n\n');
 
   // 未跟踪文件不在 git diff 输出里，按“新增文件”补成标准 diff
   if (state.untrackedChanges.length > 0) {
@@ -112,8 +114,12 @@ export async function collectDiff(repository: GitRepository): Promise<DiffSnapsh
       state.untrackedChanges.length > 0 ? state.untrackedChanges : changes,
     );
   }
+  // 二进制/不可读文件没有文本 diff，但改动真实存在，不能误报“没有改动”
   if (!diff.trim()) {
-    return undefined;
+    diff = [
+      '# 改动无法以文本 diff 呈现（二进制或不可读文件）',
+      ...files.slice(0, 50).map((file) => `- ${file}`),
+    ].join('\n');
   }
 
   return {
@@ -140,6 +146,10 @@ async function newFileDiff(changes: GitChange[]): Promise<string> {
   for (const change of changes.slice(0, MAX_SYNTHETIC_FILES)) {
     const label = vscode.workspace.asRelativePath(change.uri, false).replace(/\\/g, '/');
     try {
+      const stat = await vscode.workspace.fs.stat(change.uri);
+      if (stat.size > MAX_SYNTHETIC_BYTES) {
+        continue;
+      }
       const data = await vscode.workspace.fs.readFile(change.uri);
       if (data.byteLength > MAX_SYNTHETIC_BYTES || data.includes(0)) {
         continue;

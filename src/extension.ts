@@ -27,6 +27,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const setGenerating = (value: boolean) =>
     vscode.commands.executeCommand('setContext', GENERATING_CONTEXT, value);
 
+  // 入口守卫：配置引导与取 diff 期间按钮仍可见，二次触发会互相覆盖提交框
+  let generating = false;
+
   async function refreshStatus(): Promise<void> {
     const config = readConfig();
     const apiKey = await getApiKey(context);
@@ -73,7 +76,11 @@ export function activate(context: vscode.ExtensionContext): void {
       await refreshStatus();
       return undefined;
     }
-    await warnIfInsecureHttp(context, config.baseUrl);
+    // 用户选择切到 https 时中止本次，避免把 Key 发往旧的 http 地址
+    if (!(await warnIfInsecureHttp(context, config.baseUrl))) {
+      await refreshStatus();
+      return undefined;
+    }
     const apiKey = await ensureApiKey(context);
     if (!apiKey) {
       await refreshStatus();
@@ -106,6 +113,21 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   async function generate(): Promise<void> {
+    if (generating) {
+      void vscode.window.showInformationMessage('CommitGen：正在生成中，请稍候。');
+      return;
+    }
+    generating = true;
+    await setGenerating(true);
+    try {
+      await runGenerate();
+    } finally {
+      generating = false;
+      await setGenerating(false);
+    }
+  }
+
+  async function runGenerate(): Promise<void> {
     const repository = await pickRepository();
     if (!repository) {
       void vscode.window.showWarningMessage('CommitGen：当前没有打开的 Git 仓库。');
@@ -142,7 +164,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const original = repository.inputBox.value;
     const abort = new AbortController();
-    await setGenerating(true);
 
     try {
       await vscode.window.withProgress(
@@ -166,6 +187,7 @@ export function activate(context: vscode.ExtensionContext): void {
             prompt,
             timeoutMs: config.timeoutMs,
             signal: abort.signal,
+            temperature: config.temperature,
             reasoningEffort:
               config.reasoningEffort && config.reasoningEffort !== 'default'
                 ? config.reasoningEffort
@@ -217,8 +239,6 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       output.appendLine(`[${new Date().toISOString()}] ${describe(error)}`);
       await reportError(error);
-    } finally {
-      await setGenerating(false);
     }
   }
 
@@ -228,7 +248,10 @@ export function activate(context: vscode.ExtensionContext): void {
       await refreshStatus();
       return;
     }
-    await warnIfInsecureHttp(context, config.baseUrl);
+    if (!(await warnIfInsecureHttp(context, config.baseUrl))) {
+      await refreshStatus();
+      return;
+    }
     const apiKey = await ensureApiKey(context);
     if (!apiKey) {
       await refreshStatus();
@@ -243,7 +266,6 @@ export function activate(context: vscode.ExtensionContext): void {
     const options = [
       { label: 'default', hint: '不发送 reasoning_effort，兼容性最好' },
       { label: 'low', hint: '思考最短，最快出结果' },
-      { label: 'medium', hint: '折中' },
       { label: 'high', hint: '思考更细，更慢' },
       { label: 'max', hint: '交给服务端决定最大值，最慢' },
     ].map((option) => ({
@@ -253,7 +275,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const picked = await vscode.window.showQuickPick(options, {
       title: 'CommitGen：思考强度（reasoning_effort）',
-      placeHolder: '只在推理型模型上生效；选 default 表示不发送该参数',
+      placeHolder: '仅推理型模型支持；非推理模型请保持 default，否则可能报 400',
       ignoreFocusOut: true,
     });
     if (!picked) {
@@ -285,7 +307,13 @@ export function activate(context: vscode.ExtensionContext): void {
       {
         label: '$(gear) 配置服务地址与模型',
         description: config.baseUrl ? `${config.model || '(缺少模型)'} @ ${config.baseUrl}` : '未配置',
-        run: () => ensureConfigured(true).then(refreshStatus),
+        run: async () => {
+          const next = await ensureConfigured(true);
+          if (next) {
+            await warnIfInsecureHttp(context, next.baseUrl);
+          }
+          await refreshStatus();
+        },
       },
       {
         label: '$(key) 设置 API Key',
@@ -337,6 +365,35 @@ export function activate(context: vscode.ExtensionContext): void {
               'commitgen.baseUrl',
             );
           }
+          return;
+        }
+        case 'param': {
+          const pick = await vscode.window.showErrorMessage(
+            `CommitGen：${error.message}`,
+            '改为兼容参数',
+            '打开设置',
+          );
+          if (pick === '改为兼容参数') {
+            const configuration = vscode.workspace.getConfiguration('commitgen');
+            await configuration.update(
+              'reasoningEffort',
+              'default',
+              vscode.ConfigurationTarget.Global,
+            );
+            await configuration.update('temperature', undefined, vscode.ConfigurationTarget.Global);
+            void vscode.window.showInformationMessage(
+              'CommitGen：已把思考强度改回 default、温度改为不发送，请重试。',
+            );
+          } else if (pick === '打开设置') {
+            await vscode.commands.executeCommand(
+              'workbench.action.openSettings',
+              'commitgen.reasoningEffort',
+            );
+          }
+          return;
+        }
+        case 'ratelimit': {
+          void vscode.window.showErrorMessage(`CommitGen：${error.message} 稍后再试。`);
           return;
         }
         case 'network':

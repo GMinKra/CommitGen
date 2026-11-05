@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { normalizeBaseUrl } from './llm';
 import { DEFAULT_PROMPT } from './prompt';
 
 export type WriteMode = 'replace' | 'append' | 'ask';
@@ -12,6 +13,8 @@ export interface CommitGenConfig {
   writeMode: WriteMode;
   /** 可选：reasoning_effort，空字符串表示不发送 */
   reasoningEffort: string;
+  /** 可选：采样温度；null 表示不发送 */
+  temperature: number | null;
 }
 
 const SECTION = 'commitgen';
@@ -28,7 +31,13 @@ export function readConfig(): CommitGenConfig {
     timeoutMs: configuration.get<number>('timeoutMs') ?? 60000,
     writeMode: configuration.get<WriteMode>('writeMode') ?? 'replace',
     reasoningEffort: ((configuration.get<string>('reasoningEffort') ?? 'default').trim() || 'default'),
+    temperature: readTemperature(configuration),
   };
+}
+
+function readTemperature(configuration: vscode.WorkspaceConfiguration): number | null {
+  const raw = configuration.get<number | null>('temperature');
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
 }
 
 /** 缺 baseUrl / model 时引导填写；返回 undefined 表示用户取消。 */
@@ -38,7 +47,7 @@ export async function ensureConfigured(force = false): Promise<CommitGenConfig |
   if (force || !current.baseUrl) {
     const baseUrl = await vscode.window.showInputBox({
       title: 'CommitGen：服务地址',
-      prompt: 'OpenAI 兼容接口地址，需包含 /v1，例如 https://api.openai.com/v1',
+      prompt: 'OpenAI 兼容接口地址，例如 https://api.openai.com/v1；只填域名会自动补 /v1',
       value: current.baseUrl || 'https://api.openai.com/v1',
       ignoreFocusOut: true,
       validateInput: (input) =>
@@ -49,7 +58,7 @@ export async function ensureConfigured(force = false): Promise<CommitGenConfig |
     }
     await vscode.workspace
       .getConfiguration(SECTION)
-      .update('baseUrl', baseUrl.trim(), vscode.ConfigurationTarget.Global);
+      .update('baseUrl', normalizeBaseUrl(baseUrl), vscode.ConfigurationTarget.Global);
   }
 
   if (force || !current.model) {
@@ -126,27 +135,28 @@ export async function clearApiKey(context: vscode.ExtensionContext): Promise<voi
 
 /**
  * http 明文提示：回环地址（本机中转）不算明文外传，直接放过；
- * 其他 http 地址每次会话提示一次，「仍然使用」后按 origin 记住，不再追问。
+ * 其他 http 地址每次会话提示一次，「仍然使用」后按 origin 记住。
+ * 返回 false 表示用户选择切换地址，调用方应中止本次请求。
  */
 export async function warnIfInsecureHttp(
   context: vscode.ExtensionContext,
   baseUrl: string,
-): Promise<void> {
+): Promise<boolean> {
   if (!/^http:\/\//i.test(baseUrl.trim())) {
-    return;
+    return true;
   }
   let origin: string;
   try {
     origin = new URL(baseUrl.trim()).origin;
   } catch {
-    return;
+    return true;
   }
   if (isLoopback(origin)) {
-    return;
+    return true;
   }
   const allowed = context.globalState.get<string[]>(INSECURE_ALLOWED_KEY, []);
   if (allowed.includes(origin)) {
-    return;
+    return true;
   }
   const pick = await vscode.window.showWarningMessage(
     `CommitGen：接口 ${origin} 使用 http，API Key 会以明文经过网络，可能被中间人截获。建议改用 https，或把它换成本机中转（如 http://127.0.0.1:3000/v1）。`,
@@ -155,9 +165,14 @@ export async function warnIfInsecureHttp(
   );
   if (pick === '仍然使用') {
     await context.globalState.update(INSECURE_ALLOWED_KEY, [...allowed, origin]);
-  } else if (pick === '改用 https') {
-    await vscode.commands.executeCommand('workbench.action.openSettings', 'commitgen.baseUrl');
+    return true;
   }
+  if (pick === '改用 https') {
+    await vscode.commands.executeCommand('workbench.action.openSettings', 'commitgen.baseUrl');
+    return false;
+  }
+  // 关闭提示视为本次照旧，不记忆，下次仍会提示
+  return true;
 }
 
 function isLoopback(origin: string): boolean {
