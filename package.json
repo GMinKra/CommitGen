@@ -2,7 +2,7 @@
   "name": "commitgen",
   "displayName": "CommitGen - AI 提交信息",
   "description": "用你自己写的提示词，从 git diff 生成提交信息并写回提交框；支持任意 OpenAI 兼容接口，API Key 只存系统凭据库。",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publisher": "GMinKra",
   "license": "MIT",
   "icon": "icon.png",
@@ -20,6 +20,11 @@
         "title": "生成提交信息",
         "category": "CommitGen",
         "icon": "$(sparkle)"
+      },
+      {
+        "command": "commitgen.generateShortcut",
+        "title": "生成提交信息（快捷键）",
+        "category": "CommitGen"
       },
       {
         "command": "commitgen.hub",
@@ -69,12 +74,16 @@
         {
           "command": "commitgen.generate",
           "when": "scmProvider == git && !commitgen.generating"
+        },
+        {
+          "command": "commitgen.generateShortcut",
+          "when": "false"
         }
       ]
     },
     "keybindings": [
       {
-        "command": "commitgen.generate",
+        "command": "commitgen.generateShortcut",
         "key": "ctrl+alt+g",
         "when": "scmProvider == git && !commitgen.generating"
       }

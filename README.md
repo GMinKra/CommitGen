@@ -19,7 +19,7 @@
 从 VSIX：
 
 ```
-code --install-extension commitgen-0.3.1.vsix
+code --install-extension commitgen-0.3.2.vsix
 ```
 
 或在扩展视图右上 `⋯` → **从 VSIX 安装...**，装完重新加载窗口。

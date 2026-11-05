@@ -414,6 +414,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('commitgen.generate', generate),
+    // 键位单独挂这里，按钮的 tooltip 就不会跟着显示快捷键
+    vscode.commands.registerCommand('commitgen.generateShortcut', generate),
     vscode.commands.registerCommand('commitgen.hub', openHub),
     vscode.commands.registerCommand('commitgen.testConnection', runTestCommand),
     vscode.commands.registerCommand('commitgen.setReasoningEffort', pickReasoningEffort),
