@@ -27,7 +27,7 @@ export function readConfig(): CommitGenConfig {
     maxDiffChars: configuration.get<number>('maxDiffChars') ?? 40000,
     timeoutMs: configuration.get<number>('timeoutMs') ?? 60000,
     writeMode: configuration.get<WriteMode>('writeMode') ?? 'replace',
-    reasoningEffort: (configuration.get<string>('reasoningEffort') ?? '').trim(),
+    reasoningEffort: ((configuration.get<string>('reasoningEffort') ?? 'default').trim() || 'default'),
   };
 }
 

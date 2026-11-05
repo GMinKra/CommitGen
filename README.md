@@ -8,10 +8,10 @@
 
 - **一键生成**：源代码管理标题栏 ✨、快捷键 `Ctrl+Alt+G`、命令面板 `CommitGen: 生成提交信息`
 - **提示词完全自定义**：模板里可用 `${diff}` `${context}` `${files}` `${branch}` `${staged}`，格式、语言、粒度都由你定
-- **流式输出**：边收边写进提交框，随时可取消（取消后提交框还原）
+- **流式输出**：生成过程中逐步写入提交框（`replace` 模式实时预览；`append` / `ask` 完成后一次写入），随时可取消，取消后提交框还原
 - **写回策略**：覆盖 / 追加 / 已有内容时询问
 - **首次配置自检**：填完地址、模型、Key 会自动发一次最小请求验证连通性，失败按鉴权、404、超时、格式错误分类提示
-- **配置随时可改**：状态栏图标、源代码管理 `⋯` 菜单、命令面板三处入口
+- **配置随时可改**：状态栏 `CommitGen`、源代码管理标题栏 `⋯` → 「CommitGen: 设置与诊断」、命令面板同名命令，三处是同一个菜单（生成提交信息 / 测试连通性 / 思考强度 / 配置服务地址与模型 / 设置 API Key / 清除 API Key / 编辑提示词）
 - **Key 安全**：只进 `SecretStorage`（系统凭据库），不写 `settings.json`、不落日志
 
 ## 安装
@@ -19,7 +19,7 @@
 从 VSIX：
 
 ```
-code --install-extension commitgen-0.2.6.vsix
+code --install-extension commitgen-0.2.9.vsix
 ```
 
 或在扩展视图右上 `⋯` → **从 VSIX 安装...**，装完重新加载窗口。
@@ -45,7 +45,7 @@ code --install-extension commitgen-0.2.6.vsix
 | `commitgen.maxDiffChars` | `40000` | 发给模型的 diff 上限，超出按文件块截断 |
 | `commitgen.timeoutMs` | `60000` | 单次请求超时（毫秒） |
 | `commitgen.writeMode` | `replace` | `replace` 覆盖 / `append` 追加 / `ask` 询问 |
-| `commitgen.reasoningEffort` | 空 | 请求体的 `reasoning_effort`；推理型模型可设 `low` 缩短等待，空表示不发送 |
+| `commitgen.reasoningEffort` | `default` | 下拉可选 `default` / `low` / `medium` / `high` / `max`，对应请求体的 `reasoning_effort`；`default` 表示不发送该参数。也可在 CommitGen 菜单或命令 `CommitGen: 设置思考强度` 里改 |
 
 ## 模板变量
 

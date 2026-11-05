@@ -166,7 +166,10 @@ export function activate(context: vscode.ExtensionContext): void {
             prompt,
             timeoutMs: config.timeoutMs,
             signal: abort.signal,
-            reasoningEffort: config.reasoningEffort || undefined,
+            reasoningEffort:
+              config.reasoningEffort && config.reasoningEffort !== 'default'
+                ? config.reasoningEffort
+                : undefined,
             onReasoning: () => {
               const now = Date.now();
               if (now - lastReport > 300) {
@@ -235,6 +238,33 @@ export function activate(context: vscode.ExtensionContext): void {
     await runConnectionTest(config, apiKey);
   }
 
+  async function pickReasoningEffort(): Promise<void> {
+    const current = readConfig().reasoningEffort || 'default';
+    const options = [
+      { label: 'default', hint: '不发送 reasoning_effort，兼容性最好' },
+      { label: 'low', hint: '思考最短，最快出结果' },
+      { label: 'medium', hint: '折中' },
+      { label: 'high', hint: '思考更细，更慢' },
+      { label: 'max', hint: '交给服务端决定最大值，最慢' },
+    ].map((option) => ({
+      label: option.label,
+      description: (option.label === current ? '$(check) 当前 · ' : '') + option.hint,
+    }));
+
+    const picked = await vscode.window.showQuickPick(options, {
+      title: 'CommitGen：思考强度（reasoning_effort）',
+      placeHolder: '只在推理型模型上生效；选 default 表示不发送该参数',
+      ignoreFocusOut: true,
+    });
+    if (!picked) {
+      return;
+    }
+    await vscode.workspace
+      .getConfiguration('commitgen')
+      .update('reasoningEffort', picked.label, vscode.ConfigurationTarget.Global);
+    void vscode.window.showInformationMessage(`CommitGen：思考强度已设为 ${picked.label}。`);
+  }
+
   async function openHub(): Promise<void> {
     const config = readConfig();
     const apiKey = await getApiKey(context);
@@ -246,6 +276,11 @@ export function activate(context: vscode.ExtensionContext): void {
         label: '$(pulse) 测试连通性',
         description: configured ? `当前：${config.model}` : '需先完成配置',
         run: runTestCommand,
+      },
+      {
+        label: '$(settings-gear) 思考强度',
+        description: `当前：${config.reasoningEffort || 'default'}`,
+        run: pickReasoningEffort,
       },
       {
         label: '$(gear) 配置服务地址与模型',
@@ -324,6 +359,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('commitgen.generate', generate),
     vscode.commands.registerCommand('commitgen.hub', openHub),
     vscode.commands.registerCommand('commitgen.testConnection', runTestCommand),
+    vscode.commands.registerCommand('commitgen.setReasoningEffort', pickReasoningEffort),
     vscode.commands.registerCommand('commitgen.configure', async () => {
       await ensureConfigured(true);
       await refreshStatus();
