@@ -29,6 +29,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // 入口守卫：配置引导与取 diff 期间按钮仍可见，二次触发会互相覆盖提交框
   let generating = false;
+  // 正在进行的请求；「停止生成」按钮靠它中止
+  let activeAbort: AbortController | undefined;
+
+  function cancelGenerate(): void {
+    if (!activeAbort) {
+      void vscode.window.showInformationMessage('CommitGen：当前没有正在进行的生成。');
+      return;
+    }
+    activeAbort.abort();
+  }
 
   async function refreshStatus(): Promise<void> {
     const config = readConfig();
@@ -164,6 +174,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     const original = repository.inputBox.value;
     const abort = new AbortController();
+    activeAbort = abort;
 
     try {
       await vscode.window.withProgress(
@@ -239,6 +250,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }
       output.appendLine(`[${new Date().toISOString()}] ${describe(error)}`);
       await reportError(error);
+    } finally {
+      if (activeAbort === abort) {
+        activeAbort = undefined;
+      }
     }
   }
 
@@ -416,6 +431,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('commitgen.generate', generate),
     // 键位单独挂这里，按钮的 tooltip 就不会跟着显示快捷键
     vscode.commands.registerCommand('commitgen.generateShortcut', generate),
+    vscode.commands.registerCommand('commitgen.cancel', cancelGenerate),
     vscode.commands.registerCommand('commitgen.hub', openHub),
     vscode.commands.registerCommand('commitgen.testConnection', runTestCommand),
     vscode.commands.registerCommand('commitgen.setReasoningEffort', pickReasoningEffort),
